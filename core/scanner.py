@@ -1,4 +1,5 @@
 import os
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from concurrent.futures import ThreadPoolExecutor
 import threading
 
@@ -59,3 +60,52 @@ def scan_directory(path, progress_callback=None):
         return []
 
     return results
+
+class DirectoryScanner(QObject):
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(dict)  # ✅ résultat structuré
+
+    def __init__(self, base_path):
+        super().__init__()
+        self.base_path = base_path
+        self.queue = [base_path]
+        self.result = {}  # ✅ dict: dossier -> liste enfants
+        self.total_scanned = 0
+
+    def start(self):
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.process_next)
+        self.timer.start(10)
+
+    def process_next(self):
+        if not self.queue:
+            self.timer.stop()
+            self.finished.emit(self.result)
+            return
+
+        current_path = self.queue.pop(0)
+        children = []
+
+        try:
+            with os.scandir(current_path) as it:
+                for entry in it:
+                    path = entry.path
+                    size = entry.stat().st_size if entry.is_file() else 0
+                    item = {
+                        'name': entry.name,
+                        'path': path,
+                        'size': size,
+                        'is_dir': entry.is_dir(follow_symlinks=False)
+                    }
+                    children.append(item)
+
+                    if item['is_dir']:
+                        self.queue.append(path)
+
+                    self.total_scanned += 1
+
+        except Exception as e:
+            print(f"[scan error] {current_path} => {e}")
+
+        self.result[current_path] = children
+        self.progress.emit(min(100, self.total_scanned // 10))

@@ -1,4 +1,5 @@
 import os
+import shutil
 import threading
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QComboBox,
@@ -9,6 +10,8 @@ from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from core.scanner import scan_directory
 from core.utils import format_size
+from core.scanner import DirectoryScanner
+
 
 class MainWindow(QWidget):
     scan_finished = pyqtSignal(str, list)
@@ -63,6 +66,8 @@ class MainWindow(QWidget):
         self.progress.setVisible(False)
         self.progress.setTextVisible(False)
         self.progress_changed.connect(self.progress.setValue)
+
+        self.scan_finished.connect(self.build_tree)
 
         self.progress_bar_layout = QHBoxLayout()
         self.progress_bar_layout.setContentsMargins(0, 0, 0, 0)
@@ -127,6 +132,8 @@ class MainWindow(QWidget):
         self.tree.setHeaderLabels(["Nom", "Taille"])
         self.tree.itemExpanded.connect(self.load_sub_items)
         self.main_layout.addWidget(self.tree)
+        self.scan_finished.connect(self.update_stats)
+
 
     def populate_disks(self):
         self.disk_radiobuttons.clear()
@@ -163,14 +170,32 @@ class MainWindow(QWidget):
 
         selected_disk = selected_button.text()
         self.tree.clear()
-        self.scanned_data = {}
         self.progress.setValue(0)
-
         self.progress.setVisible(True)
+        self.progress_label.setText("0%")
 
-        thread = threading.Thread(target=self.scan_thread, args=(selected_disk,))
-        thread.start()
+        self.scanner = DirectoryScanner(selected_disk)
+        self.scanner.progress.connect(self.update_progress)
+        self.scanner.finished.connect(self.on_scan_finished)
+        self.scanner.start()
 
+    def on_scan_finished(self, children_dict):
+        self.scanned_data = children_dict
+        self.tree.clear()
+
+        for item in sorted(children_dict[self.scanner.base_path], key=lambda x: x['size'], reverse=True):
+            node = QTreeWidgetItem([item['name'], format_size(item['size'])])
+            node.setData(0, Qt.ItemDataRole.UserRole, item['path'])
+
+            icon = QIcon("resources/folder.png") if item['is_dir'] else QIcon("resources/file.png")
+            node.setIcon(0, icon)
+
+            if item['is_dir']:
+                node.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
+
+            self.tree.addTopLevelItem(node)
+
+        self.update_stats(self.scanner.base_path, children_dict[self.scanner.base_path])
 
 
     def scan_thread(self, path):
@@ -183,6 +208,7 @@ class MainWindow(QWidget):
 
         # Signale la fin du scan au thread principal
         self.scan_finished.emit(path, data)
+        self.update_stats(path, data)
 
 
     def build_tree(self, base_path, data):
@@ -203,16 +229,23 @@ class MainWindow(QWidget):
 
     def load_sub_items(self, item):
         path = item.data(0, Qt.ItemDataRole.UserRole)
-        if not path or not os.path.isdir(path):
+        if not path or path not in self.scanned_data:
             return
 
-        children = scan_directory(path)
-        for child in sorted(children, key=lambda x: x['size'], reverse=True):
+        item.takeChildren()  # nettoie les enfants si déjà chargés
+
+        for child in sorted(self.scanned_data[path], key=lambda x: x['size'], reverse=True):
             sub_item = QTreeWidgetItem([child['name'], format_size(child['size'])])
             sub_item.setData(0, Qt.ItemDataRole.UserRole, child['path'])
-            if os.path.isdir(child['path']):
+
+            if child['is_dir']:
                 sub_item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
+
+            icon = QIcon("resources/folder.png") if child['is_dir'] else QIcon("resources/file.png")
+            sub_item.setIcon(0, icon)
+
             item.addChild(sub_item)
+
 
     def toggle_theme(self):
         self.dark_mode = not self.dark_mode
@@ -224,6 +257,44 @@ class MainWindow(QWidget):
     def update_progress(self, value):
         self.progress.setValue(value)
         self.progress_label.setText(f"{value}%")
+
+    def update_stats(self, path, data):
+        print(f"update_stats appelé avec {len(data)} éléments à la racine")
+        if os.name == 'nt':
+            usage = shutil.disk_usage(path)
+            total_disk = usage.total
+            used_disk = usage.used
+            free_disk = usage.free
+        else:
+            stat = os.statvfs(path)
+            total_disk = stat.f_frsize * stat.f_blocks
+            free_disk = stat.f_frsize * stat.f_bfree
+            used_disk = total_disk - free_disk
+
+        file_count = self.count_files_recursively(data)
+
+        self.stats_label.setText(
+            f"Taille totale : {format_size(total_disk)}\n"
+            f"Utilisé : {format_size(used_disk)}\n"
+            f"Libre : {format_size(free_disk)}\n"
+            f"Fichiers scannés : {file_count}"
+        )
+
+
+    def count_files_recursively(self, directory_data):
+        count = 0
+        for item in directory_data:
+            print("Analyse :", item["path"])
+            if os.path.isdir(item['path']):
+                try:
+                    children = scan_directory(item['path'])
+                    count += self.count_files_recursively(children)
+                except Exception:
+                    print(f"Erreur d'accès à {item['path']}: {e}")
+                    continue  # On skippe les erreurs (droits d'accès etc.)
+            else:
+                count += 1
+        return count
 
 
     def apply_theme(self):
