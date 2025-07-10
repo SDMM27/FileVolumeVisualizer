@@ -311,6 +311,21 @@ class MainWindow(QWidget):
                     color: white;
                 }
 
+                QRadioButton::indicator {
+                    width: 10px;
+                    height: 10px;
+                    border-radius: 5px;
+                    border: 2px solid #888;
+                    background: #f0f0f0;
+                }
+                QRadioButton::indicator:checked {
+                    background: #4c7bf4;  /* Couleur claire pour la coche */
+                    border: 2px solid #fff;
+                }
+                QRadioButton::indicator:hover {
+                    border: 2px solid #4c7bf4;
+                }
+
                 QPushButton {
                     background-color: #2d2d2d;
                     color: white;
@@ -384,6 +399,21 @@ class MainWindow(QWidget):
 
                 QLabel, QRadioButton {
                     color: #222;
+                }
+
+                QRadioButton::indicator {
+                    width: 10px;
+                    height: 10px;
+                    border-radius: 5px;
+                    border: 2px solid #888;
+                    background: #f0f0f0;
+                }
+                QRadioButton::indicator:checked {
+                    background: #4c7bf4;  /* Couleur claire pour la coche */
+                    border: 2px solid #fff;
+                }
+                QRadioButton::indicator:hover {
+                    border: 2px solid #4c7bf4;
                 }
 
                 QPushButton {
