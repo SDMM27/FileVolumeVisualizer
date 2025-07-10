@@ -2,9 +2,10 @@ import os
 import shutil
 import threading
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QHBoxLayout, QComboBox,
+    QWidget, QVBoxLayout, QLabel, QHBoxLayout, QComboBox, QSizePolicy,
     QPushButton, QProgressBar, QListWidget, QListWidgetItem,
-    QFileIconProvider, QTreeWidget, QTreeWidgetItem, QSizePolicy, QSplitter, QCheckBox, QGroupBox, QRadioButton, QButtonGroup
+    QFileIconProvider, QTreeWidget, QTreeWidgetItem, QSizePolicy, QSplitter, QCheckBox, QGroupBox, QRadioButton, QButtonGroup,
+    QSpacerItem
 )
 from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
@@ -107,14 +108,47 @@ class MainWindow(QWidget):
         self.sidebar_widget.setLayout(self.sidebar_wrapper_layout)
         self.sidebar_widget.setFixedWidth(280)
 
-        self.main_layout.addWidget(self.sidebar_widget)
+        # 🥪 Breadcrumb
+        self.breadcrumb_layout = QHBoxLayout()
+        self.breadcrumb_widget = QWidget()
+        self.breadcrumb_widget.setLayout(self.breadcrumb_layout)
+
+        self.breadcrumb_spacer = QSpacerItem(1, 1, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.breadcrumb_layout.addItem(self.breadcrumb_spacer)
+        self.breadcrumb_widget.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+
+        # Layout central vertical pour breadcrumb + file_list
+        self.central_layout = QVBoxLayout()
+        self.central_widget = QWidget()
+        self.central_widget.setLayout(self.central_layout)
+
+        self.file_list = QTreeWidget()
+        self.file_list.setHeaderLabels(["Nom", "Taille"])
+        self.file_list.itemDoubleClicked.connect(self.on_item_double_clicked)
+
+        self.central_layout.addWidget(self.breadcrumb_widget)  # Breadcrumb en haut
+        self.central_layout.addWidget(self.file_list)          # Liste en dessous
+
+        self.main_layout.addWidget(self.sidebar_widget)         # Sidebar à gauche
+        self.main_layout.addWidget(self.central_widget)         # Partie centrale à droite
 
         # 🟦 Arborescence centrale
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Nom", "Taille"])
-        self.tree.itemExpanded.connect(self.load_sub_items)
-        self.main_layout.addWidget(self.tree)
+        # self.tree = QTreeWidget()
+        # self.tree.setHeaderLabels(["Nom", "Taille"])
+        # self.tree.itemExpanded.connect(self.load_sub_items)
+        # self.main_layout.addWidget(self.tree)
         self.scan_finished.connect(self.on_scan_finished)
+
+        self.current_path = None
+        # self.breadcrumb_layout = QHBoxLayout()
+        # self.breadcrumb_widget = QWidget()
+        # self.breadcrumb_widget.setLayout(self.breadcrumb_layout)
+        # self.main_layout.addWidget(self.breadcrumb_widget)  # Ajoute la breadcrumb au-dessus de la liste
+
+        # self.file_list = QTreeWidget()
+        # self.file_list.setHeaderLabels(["Nom", "Taille"])
+        # self.file_list.itemDoubleClicked.connect(self.on_item_double_clicked)
+        # self.main_layout.addWidget(self.file_list)
 
 
     def populate_disks(self):
@@ -151,7 +185,7 @@ class MainWindow(QWidget):
             return
 
         selected_disk = selected_button.text()
-        self.tree.clear()
+        self.file_list.clear()
         # self.progress.setValue(0)
         # self.progress.setVisible(True)
         # self.progress_label.setText("0%")
@@ -164,17 +198,8 @@ class MainWindow(QWidget):
 
     def on_scan_finished(self, children_dict):
         self.scanned_data = children_dict
-        self.tree.clear()
-        base_path = next(iter(children_dict))
-        for item in sorted(children_dict[base_path], key=lambda x: x['size'], reverse=True):
-            node = QTreeWidgetItem([item['name'], format_size(item['size'])])
-            node.setData(0, Qt.ItemDataRole.UserRole, item['path'])
-            icon = QIcon("resources/folder.png") if item.get('is_dir', False) else QIcon("resources/file.png")
-            node.setIcon(0, icon)
-            if item.get('is_dir', False):
-                node.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
-            self.tree.addTopLevelItem(node)
-        self.update_stats(base_path, children_dict[base_path])
+        self.base_disk_path = next(iter(children_dict))  # <-- Ajoute cette ligne
+        self.show_folder(self.base_disk_path)
         self.scan_status_label.setText("Scan terminé")
         self.scan_button.setEnabled(True)
 
@@ -246,8 +271,8 @@ class MainWindow(QWidget):
         self.progress.setValue(value)
         self.progress_label.setText(f"{value}%")
 
-    def update_stats(self, path, data):
-        print(f"update_stats appelé avec {len(data)} éléments à la racine")
+    def update_stats(self):
+        path = self.base_disk_path  # Toujours le disque racine
         if os.name == 'nt':
             usage = shutil.disk_usage(path)
             total_disk = usage.total
@@ -475,4 +500,69 @@ class MainWindow(QWidget):
                 result.update(self.scan_subfolders(item['path'], progress_callback))
         print(f"[scan_subfolders] Remontée de: {folder_path}")  # <-- Ajout du log
         return result
+
+    def update_breadcrumb(self, path):
+        # Nettoie la barre
+        for i in reversed(range(self.breadcrumb_layout.count())):
+            item = self.breadcrumb_layout.itemAt(i)
+            if item is not None:
+                widget = item.widget()
+                if widget:
+                    widget.setParent(None)
+                else:
+                    self.breadcrumb_layout.removeItem(item)
+        # Ajoute un bouton pour chaque niveau
+        parts = []
+        drive, rest = os.path.splitdrive(path)
+        if drive:
+            parts.append(drive + os.sep)
+            rest = rest.lstrip(os.sep)
+        if rest:
+            parts += rest.split(os.sep)
+        current = ""
+        for i, part in enumerate(parts):
+            if i == 0:
+                current = part
+            else:
+                current = os.path.join(current, part)
+            btn = QPushButton(part)
+            btn.setFlat(True)
+            btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)  # <-- Compact
+            btn.setStyleSheet("padding: 2px 8px; margin: 0 2px;")  # <-- Optionnel, esthétique
+            btn.clicked.connect(lambda checked, p=current: self.show_folder(p))
+            self.breadcrumb_layout.addWidget(btn)
+            if i < len(parts) - 1:
+                arrow = QLabel(">")
+                arrow.setStyleSheet("padding: 0 4px;")
+                self.breadcrumb_layout.addWidget(arrow)
+        # Ajoute le spacer à la fin pour pousser les boutons à gauche
+        self.breadcrumb_layout.addItem(self.breadcrumb_spacer)
+
+    def show_folder(self, path):
+        self.current_path = path
+        self.update_breadcrumb(path)
+        self.file_list.clear()
+        if path not in self.scanned_data:
+            return
+        for item in sorted(self.scanned_data[path], key=lambda x: x['size'], reverse=True):
+            node = QTreeWidgetItem([item['name'], format_size(item['size'])])
+            node.setData(0, Qt.ItemDataRole.UserRole, item['path'])
+            icon = QIcon("resources/folder.png") if item['is_dir'] else QIcon("resources/file.png")
+            node.setIcon(0, icon)
+            self.file_list.addTopLevelItem(node)
+        self.update_stats()  # <-- Appelle sans argument
+
+    def on_item_double_clicked(self, item, column):
+        path = item.data(0, Qt.ItemDataRole.UserRole)
+        # Si c'est un dossier, on l'affiche
+        for child in self.scanned_data.get(self.current_path, []):
+            if child['path'] == path and child['is_dir']:
+                self.show_folder(path)
+                break
+
+    def go_back(self):
+        if self.current_path:
+            parent = os.path.dirname(self.current_path.rstrip(os.sep))
+            if parent and parent in self.scanned_data:
+                self.show_folder(parent)
 
