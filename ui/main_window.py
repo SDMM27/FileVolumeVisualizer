@@ -8,13 +8,13 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from core.scanner import scan_directory
+from core.scanner import scan_directory, get_size
 from core.utils import format_size
 from core.scanner import DirectoryScanner
 
 
 class MainWindow(QWidget):
-    scan_finished = pyqtSignal(str, list)
+    scan_finished = pyqtSignal(dict)
     progress_changed = pyqtSignal(int)
 
     def __init__(self):
@@ -59,29 +59,11 @@ class MainWindow(QWidget):
 
         self.scan_button = QPushButton("Démarrer le scan")
         self.scan_button.clicked.connect(self.start_scan)
+        self.progress_layout.addWidget(self.scan_button)  # <-- Ajout du bouton ici
 
-        self.progress = QProgressBar()
-        self.progress.setFixedHeight(5)
-        self.progress.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.progress.setVisible(False)
-        self.progress.setTextVisible(False)
-        self.progress_changed.connect(self.progress.setValue)
+        self.scan_status_label = QLabel("")
+        self.progress_layout.addWidget(self.scan_status_label)
 
-        self.scan_finished.connect(self.build_tree)
-
-        self.progress_bar_layout = QHBoxLayout()
-        self.progress_bar_layout.setContentsMargins(0, 0, 0, 0)
-        self.progress_label = QLabel("0%")
-        self.progress_label.setStyleSheet("color: white;")  # ou noir en mode clair
-
-        self.progress_bar_layout.addWidget(self.progress)
-        self.progress_bar_layout.addWidget(self.progress_label)
-
-        self.progress_changed.connect(self.update_progress)
-
-        self.progress_layout.addWidget(self.scan_button)
-        self.progress_layout.addSpacing(8)  # <-- Espace entre bouton et barre
-        self.progress_layout.addLayout(self.progress_bar_layout)
         self.progress_group.setLayout(self.progress_layout)
         self.progress_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.sidebar_layout.addWidget(self.progress_group)
@@ -132,7 +114,7 @@ class MainWindow(QWidget):
         self.tree.setHeaderLabels(["Nom", "Taille"])
         self.tree.itemExpanded.connect(self.load_sub_items)
         self.main_layout.addWidget(self.tree)
-        self.scan_finished.connect(self.update_stats)
+        self.scan_finished.connect(self.on_scan_finished)
 
 
     def populate_disks(self):
@@ -170,45 +152,50 @@ class MainWindow(QWidget):
 
         selected_disk = selected_button.text()
         self.tree.clear()
-        self.progress.setValue(0)
-        self.progress.setVisible(True)
-        self.progress_label.setText("0%")
+        # self.progress.setValue(0)
+        # self.progress.setVisible(True)
+        # self.progress_label.setText("0%")
 
-        self.scanner = DirectoryScanner(selected_disk)
-        self.scanner.progress.connect(self.update_progress)
-        self.scanner.finished.connect(self.on_scan_finished)
-        self.scanner.start()
+        self.scan_button.setEnabled(False)
+        self.scan_status_label.setText("Scan en cours...")
+
+        # Lance le scan dans un thread séparé
+        threading.Thread(target=self.scan_thread, args=(selected_disk,), daemon=True).start()
 
     def on_scan_finished(self, children_dict):
         self.scanned_data = children_dict
         self.tree.clear()
-
-        for item in sorted(children_dict[self.scanner.base_path], key=lambda x: x['size'], reverse=True):
+        base_path = next(iter(children_dict))
+        for item in sorted(children_dict[base_path], key=lambda x: x['size'], reverse=True):
             node = QTreeWidgetItem([item['name'], format_size(item['size'])])
             node.setData(0, Qt.ItemDataRole.UserRole, item['path'])
-
-            icon = QIcon("resources/folder.png") if item['is_dir'] else QIcon("resources/file.png")
+            icon = QIcon("resources/folder.png") if item.get('is_dir', False) else QIcon("resources/file.png")
             node.setIcon(0, icon)
-
-            if item['is_dir']:
+            if item.get('is_dir', False):
                 node.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
-
             self.tree.addTopLevelItem(node)
-
-        self.update_stats(self.scanner.base_path, children_dict[self.scanner.base_path])
+        self.update_stats(base_path, children_dict[base_path])
+        self.scan_status_label.setText("Scan terminé")
+        self.scan_button.setEnabled(True)
 
 
     def scan_thread(self, path):
         def update_callback(progress):
             self.progress_changed.emit(progress)
 
-
+        # Scan complet (lent mais précis)
         data = scan_directory(path, update_callback)
-        self.scanned_data[path] = data
+        # On veut un dict: dossier -> liste enfants
+        children_dict = {path: data}
+        # Pour chaque sous-dossier, ajoute ses enfants récursivement
+        for item in data:
+            if os.path.isdir(item['path']):
+                children_dict.update(self.scan_subfolders(item['path'], update_callback))
 
-        # Signale la fin du scan au thread principal
-        self.scan_finished.emit(path, data)
-        self.update_stats(path, data)
+        self.scanned_data = children_dict
+
+        # Signale la fin du scan au thread principal (via signal Qt)
+        self.scan_finished.emit(children_dict)
 
 
     def build_tree(self, base_path, data):
@@ -235,7 +222,8 @@ class MainWindow(QWidget):
         item.takeChildren()  # nettoie les enfants si déjà chargés
 
         for child in sorted(self.scanned_data[path], key=lambda x: x['size'], reverse=True):
-            sub_item = QTreeWidgetItem([child['name'], format_size(child['size'])])
+            size = child['size']
+            sub_item = QTreeWidgetItem([child['name'], format_size(size)])
             sub_item.setData(0, Qt.ItemDataRole.UserRole, child['path'])
 
             if child['is_dir']:
@@ -271,7 +259,7 @@ class MainWindow(QWidget):
             free_disk = stat.f_frsize * stat.f_bfree
             used_disk = total_disk - free_disk
 
-        file_count = self.count_files_recursively(data)
+        file_count = self.count_files_recursively(path)
 
         self.stats_label.setText(
             f"Taille totale : {format_size(total_disk)}\n"
@@ -281,20 +269,18 @@ class MainWindow(QWidget):
         )
 
 
-    def count_files_recursively(self, directory_data):
+    def count_files_recursively(self, path):
         count = 0
-        for item in directory_data:
-            print("Analyse :", item["path"])
-            if os.path.isdir(item['path']):
-                try:
-                    children = scan_directory(item['path'])
-                    count += self.count_files_recursively(children)
-                except Exception:
-                    print(f"Erreur d'accès à {item['path']}: {e}")
-                    continue  # On skippe les erreurs (droits d'accès etc.)
+        if path not in self.scanned_data:
+            return 0
+
+        for item in self.scanned_data[path]:
+            if item['is_dir']:
+                count += self.count_files_recursively(item['path'])
             else:
                 count += 1
         return count
+
 
 
     def apply_theme(self):
@@ -447,4 +433,16 @@ class MainWindow(QWidget):
                     border-radius: 5px;
                 }
             """)
+
+    def scan_subfolders(self, folder_path, progress_callback):
+        """Scan récursivement tous les sous-dossiers et retourne un dict."""
+        print(f"[scan_subfolders] Descend dans: {folder_path}")  # <-- Ajout du log
+        result = {}
+        children = scan_directory(folder_path, progress_callback)
+        result[folder_path] = children
+        for item in children:
+            if os.path.isdir(item['path']):
+                result.update(self.scan_subfolders(item['path'], progress_callback))
+        print(f"[scan_subfolders] Remontée de: {folder_path}")  # <-- Ajout du log
+        return result
 
