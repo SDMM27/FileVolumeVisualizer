@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QComboBox, QSizePolicy,
     QPushButton, QProgressBar, QListWidget, QListWidgetItem,
     QFileIconProvider, QTreeWidget, QTreeWidgetItem, QSizePolicy, QSplitter, QCheckBox, QGroupBox, QRadioButton, QButtonGroup,
-    QSpacerItem, QFileDialog
+    QSpacerItem, QFileDialog, QLineEdit
 )
 from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
@@ -92,6 +92,14 @@ class MainWindow(QWidget):
 
         self.filters_label = QLabel("🔧 Filtres à venir...")
         self.filters_layout.addWidget(self.filters_label)
+
+        self.filter_size_input = QLineEdit()
+        self.filter_size_input.setPlaceholderText("Taille minimale en Mo")
+        self.filters_layout.addWidget(self.filter_size_input)
+
+        self.apply_filter_button = QPushButton("Appliquer le filtre")
+        self.apply_filter_button.clicked.connect(self.apply_size_filter)
+        self.filters_layout.addWidget(self.apply_filter_button)
 
         self.filters_group.setLayout(self.filters_layout)
         self.filters_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
@@ -527,19 +535,26 @@ class MainWindow(QWidget):
         # Ajoute le spacer à la fin pour pousser les boutons à gauche
         self.breadcrumb_layout.addItem(self.breadcrumb_spacer)
 
-    def show_folder(self, path):
+    def show_folder(self, path, min_size_bytes=None):
+        if min_size_bytes is None:
+            try:
+                min_size_mb = float(self.filter_size_input.text())
+                min_size_bytes = min_size_mb * 1024 * 1024
+            except Exception:
+                min_size_bytes = 0
         self.current_path = path
         self.update_breadcrumb(path)
         self.file_list.clear()
         if path not in self.scanned_data:
             return
         for item in sorted(self.scanned_data[path], key=lambda x: x['size'], reverse=True):
-            node = QTreeWidgetItem([item['name'], format_size(item['size'])])
-            node.setData(0, Qt.ItemDataRole.UserRole, item['path'])
-            icon = QIcon("resources/folder.png") if item['is_dir'] else QIcon("resources/file.png")
-            node.setIcon(0, icon)
-            self.file_list.addTopLevelItem(node)
-        self.update_stats()  # <-- Appelle sans argument
+            if item['size'] >= min_size_bytes:
+                node = QTreeWidgetItem([item['name'], format_size(item['size'])])
+                node.setData(0, Qt.ItemDataRole.UserRole, item['path'])
+                icon = QIcon("resources/folder.png") if item['is_dir'] else QIcon("resources/file.png")
+                node.setIcon(0, icon)
+                self.file_list.addTopLevelItem(node)
+        self.update_stats()
 
     def on_item_double_clicked(self, item, column):
         path = item.data(0, Qt.ItemDataRole.UserRole)
@@ -570,4 +585,13 @@ class MainWindow(QWidget):
             for radio in self.disk_radiobuttons:
                 radio.setChecked(False)
             self.disk_buttongroup.setExclusive(True)
+
+    def apply_size_filter(self):
+        try:
+            min_size_mb = float(self.filter_size_input.text())
+        except ValueError:
+            self.scan_status_label.setText("Valeur de filtre invalide.")
+            return
+        min_size_bytes = min_size_mb * 1024 * 1024
+        self.show_folder(self.current_path, min_size_bytes)
 
