@@ -25,8 +25,7 @@ def get_size(path):
     try:
         if os.path.isfile(path):
             total_size += os.path.getsize(path)
-        else:
-            print(f"[get_size] Calculating size for: {path}")  # <-- Ajout du log
+        else:  # <-- Ajout du log
             for dirpath, dirnames, filenames in os.walk(path, onerror=lambda e: None):
                 for f in filenames:
                     fp = os.path.join(dirpath, f)
@@ -52,16 +51,13 @@ def scan_directory(path, progress_callback=None):
     ignored_folders = get_ignored_folders()
     results = []
     try:
-        print(f"[scan_directory] Scanning: {path}")
         if os.path.abspath(path) in ignored_folders:
-            print(f"[scan_directory] Ignored system folder: {path}")
             return []
         entries = os.scandir(path)
         for entry in entries:
             entry_path = os.path.join(path, entry.name)
             # Ignore les dossiers de la liste noire
             if entry.is_dir(follow_symlinks=False) and os.path.abspath(entry_path) in ignored_folders:
-                print(f"  [scan_directory] Ignored: {entry_path}")
                 continue
             if entry.name.startswith('.'):
                 continue
@@ -73,20 +69,15 @@ def scan_directory(path, progress_callback=None):
                     'size': size,
                     'is_dir': entry.is_dir(follow_symlinks=False)
                 })
-                print(f"  [scan_directory] {'DIR' if entry.is_dir(follow_symlinks=False) else 'FILE'}: {entry_path} ({size} bytes)")
+
             except PermissionError:
-                print(f"  [scan_directory] Permission denied: {entry_path}")
                 continue
             except Exception as e:
-                print(f"  [scan_directory] Error on {entry_path}: {e}")
                 continue
     except PermissionError:
-        print(f"[scan_directory] Permission denied: {path}")
         pass
     except Exception as e:
-        print(f"[scan_directory] Error: {e}")
         return []
-    print(f"[scan_directory] Finished: {path} ({len(results)} items)\n")
     return results
 
 class DirectoryScanner(QObject):
@@ -107,9 +98,7 @@ class DirectoryScanner(QObject):
 
     def process_next(self):
         if not self.queue:
-            print("[DirectoryScanner] Queue vide, scan terminé.")
             self.timer.stop()
-            print(f"[DirectoryScanner] Résultat final: {self.result}")
             self.finished.emit(self.result)
             return
 
@@ -140,17 +129,15 @@ class DirectoryScanner(QObject):
                     self.total_scanned += 1
 
         except PermissionError:
-            print(f"[DirectoryScanner] Permission refusée: {current_path}")
+            print(f"Permission denied: {current_path}")  # Log pour les permissions
         except Exception as e:
-            print(f"[scan error] {current_path}: {e}")
+            print(f"Error on {current_path}: {e}")
 
         self.result[current_path] = children
         progress = min(100, self.total_scanned // 10)
-        print(f"[DirectoryScanner] Progress: {progress}% (scanné: {self.total_scanned})")
         self.progress.emit(progress)
 
         # Si on atteint 100% mais la queue n'est pas vide, forcer l'affichage
         if progress >= 100 and self.queue:
-            print("[DirectoryScanner] Progress à 100% mais queue non vide, émission forcée du résultat.")
             self.timer.stop()
             self.finished.emit(self.result)

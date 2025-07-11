@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QComboBox, QSizePolicy,
     QPushButton, QProgressBar, QListWidget, QListWidgetItem,
     QFileIconProvider, QTreeWidget, QTreeWidgetItem, QSizePolicy, QSplitter, QCheckBox, QGroupBox, QRadioButton, QButtonGroup,
-    QSpacerItem
+    QSpacerItem, QFileDialog
 )
 from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
@@ -52,6 +52,10 @@ class MainWindow(QWidget):
         self.disk_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.sidebar_layout.addWidget(self.disk_group)
 
+        self.folder_button = QPushButton("Sélectionner un dossier...")
+        self.folder_button.clicked.connect(self.select_folder)
+        self.sidebar_layout.addWidget(self.folder_button)
+
         # === 2️⃣ Progression & Scan
         self.progress_group = QGroupBox("Progression du scan")
         self.progress_layout = QVBoxLayout()
@@ -69,8 +73,8 @@ class MainWindow(QWidget):
         self.progress_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.sidebar_layout.addWidget(self.progress_group)
 
-        # === 3️⃣ Statistiques disque
-        self.stats_group = QGroupBox("Statistiques du disque")
+        # === 3️⃣ Statistiques du scan
+        self.stats_group = QGroupBox("Statistiques du scan")
         self.stats_layout = QVBoxLayout()
         self.stats_layout.setContentsMargins(6, 18, 6, 6)
 
@@ -140,6 +144,7 @@ class MainWindow(QWidget):
         self.scan_finished.connect(self.on_scan_finished)
 
         self.current_path = None
+        self.scan_type = None  # "disk" ou "folder"
         # self.breadcrumb_layout = QHBoxLayout()
         # self.breadcrumb_widget = QWidget()
         # self.breadcrumb_widget.setLayout(self.breadcrumb_layout)
@@ -174,27 +179,40 @@ class MainWindow(QWidget):
             self.disk_buttongroup.addButton(radio, 0)
             self.disk_layout.addWidget(radio)
 
-        # Sélectionne le premier disque par défaut
-        if self.disk_radiobuttons:
-            self.disk_radiobuttons[0].setChecked(True)
+        # Retire la sélection automatique du premier disque
+        # if self.disk_radiobuttons:
+        #     self.disk_radiobuttons[0].setChecked(True)
 
+        for radio in self.disk_radiobuttons:
+            radio.toggled.connect(self.on_disk_selected)
+
+    def on_disk_selected(self, checked):
+        if checked:
+            self.selected_path = self.disk_buttongroup.checkedButton().text()
+            self.selected_type = "disk"
+            self.scan_status_label.setText(f"Disque sélectionné : {self.selected_path}")
+        else:
+            # Ne rien faire si un dossier est sélectionné
+            if self.selected_type == "folder":
+                return
+            # Si aucun disque n'est sélectionné, on efface le chemin
+            if not any(radio.isChecked() for radio in self.disk_radiobuttons):
+                self.selected_path = None
+                self.selected_type = None
 
     def start_scan(self):
-        selected_button = self.disk_buttongroup.checkedButton()
-        if not selected_button:
+        if not self.selected_path or not self.selected_type:
+            self.scan_status_label.setText("Veuillez sélectionner un disque ou un dossier avant de lancer le scan.")
             return
 
-        selected_disk = selected_button.text()
         self.file_list.clear()
-        # self.progress.setValue(0)
-        # self.progress.setVisible(True)
-        # self.progress_label.setText("0%")
-
         self.scan_button.setEnabled(False)
-        self.scan_status_label.setText("Scan en cours...")
-
-        # Lance le scan dans un thread séparé
-        threading.Thread(target=self.scan_thread, args=(selected_disk,), daemon=True).start()
+        if self.selected_type == "disk":
+            self.scan_status_label.setText(f"Scan du disque {self.selected_path} en cours...")
+        else:
+            self.scan_status_label.setText(f"Scan du dossier {self.selected_path} en cours...")
+        self.scan_type = self.selected_type
+        threading.Thread(target=self.scan_thread, args=(self.selected_path,), daemon=True).start()
 
     def on_scan_finished(self, children_dict):
         self.scanned_data = children_dict
@@ -272,26 +290,34 @@ class MainWindow(QWidget):
         self.progress_label.setText(f"{value}%")
 
     def update_stats(self):
-        path = self.base_disk_path  # Toujours le disque racine
-        if os.name == 'nt':
-            usage = shutil.disk_usage(path)
-            total_disk = usage.total
-            used_disk = usage.used
-            free_disk = usage.free
-        else:
-            stat = os.statvfs(path)
-            total_disk = stat.f_frsize * stat.f_blocks
-            free_disk = stat.f_frsize * stat.f_bfree
-            used_disk = total_disk - free_disk
-
+        path = self.base_disk_path
         file_count = self.count_files_recursively(path)
+        if self.scan_type == "disk":
+            if os.name == 'nt':
+                usage = shutil.disk_usage(path)
+                total_disk = usage.total
+                used_disk = usage.used
+                free_disk = usage.free
+            else:
+                stat = os.statvfs(path)
+                total_disk = stat.f_frsize * stat.f_blocks
+                free_disk = stat.f_frsize * stat.f_bfree
+                used_disk = total_disk - free_disk
 
-        self.stats_label.setText(
-            f"Taille totale : {format_size(total_disk)}\n"
-            f"Utilisé : {format_size(used_disk)}\n"
-            f"Libre : {format_size(free_disk)}\n"
-            f"Fichiers scannés : {file_count}"
-        )
+            self.stats_label.setText(
+                f"Type : Disque\n"
+                f"Taille totale : {format_size(total_disk)}\n"
+                f"Utilisé : {format_size(used_disk)}\n"
+                f"Libre : {format_size(free_disk)}\n"
+                f"Fichiers scannés : {file_count}"
+            )
+        else:
+            folder_size = get_size(path)
+            self.stats_label.setText(
+                f"Type : Dossier\n"
+                f"Taille totale : {format_size(folder_size)}\n"
+                f"Fichiers scannés : {file_count}"
+            )
 
 
     def count_files_recursively(self, path):
@@ -490,15 +516,13 @@ class MainWindow(QWidget):
             """)
 
     def scan_subfolders(self, folder_path, progress_callback):
-        """Scan récursivement tous les sous-dossiers et retourne un dict."""
-        print(f"[scan_subfolders] Descend dans: {folder_path}")  # <-- Ajout du log
+        """Scan récursivement tous les sous-dossiers et retourne un dict."""# <-- Ajout du log
         result = {}
         children = scan_directory(folder_path, progress_callback)
         result[folder_path] = children
         for item in children:
             if os.path.isdir(item['path']):
                 result.update(self.scan_subfolders(item['path'], progress_callback))
-        print(f"[scan_subfolders] Remontée de: {folder_path}")  # <-- Ajout du log
         return result
 
     def update_breadcrumb(self, path):
@@ -511,30 +535,58 @@ class MainWindow(QWidget):
                     widget.setParent(None)
                 else:
                     self.breadcrumb_layout.removeItem(item)
-        # Ajoute un bouton pour chaque niveau
+
         parts = []
-        drive, rest = os.path.splitdrive(path)
-        if drive:
-            parts.append(drive + os.sep)
-            rest = rest.lstrip(os.sep)
-        if rest:
-            parts += rest.split(os.sep)
-        current = ""
-        for i, part in enumerate(parts):
-            if i == 0:
-                current = part
+        # Si scan d'un dossier, on part du dossier sélectionné
+        if self.scan_type == "folder":
+            # On veut le chemin relatif à la racine scannée
+            base = self.base_disk_path
+            rel_path = os.path.relpath(path, base)
+            # Si on est sur la racine, juste le nom du dossier
+            if rel_path == ".":
+                parts = [os.path.basename(base)]
             else:
-                current = os.path.join(current, part)
-            btn = QPushButton(part)
-            btn.setFlat(True)
-            btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)  # <-- Compact
-            btn.setStyleSheet("padding: 2px 8px; margin: 0 2px;")  # <-- Optionnel, esthétique
-            btn.clicked.connect(lambda checked, p=current: self.show_folder(p))
-            self.breadcrumb_layout.addWidget(btn)
-            if i < len(parts) - 1:
-                arrow = QLabel(">")
-                arrow.setStyleSheet("padding: 0 4px;")
-                self.breadcrumb_layout.addWidget(arrow)
+                parts = [os.path.basename(base)] + rel_path.split(os.sep)
+            current = base
+            for i, part in enumerate(parts):
+                if i == 0:
+                    current = base
+                else:
+                    current = os.path.join(current, part)
+                btn = QPushButton(part)
+                btn.setFlat(True)
+                btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+                btn.setStyleSheet("padding: 2px 8px; margin: 0 2px;")
+                btn.clicked.connect(lambda checked, p=current: self.show_folder(p))
+                self.breadcrumb_layout.addWidget(btn)
+                if i < len(parts) - 1:
+                    arrow = QLabel(">")
+                    arrow.setStyleSheet("padding: 0 4px;")
+                    self.breadcrumb_layout.addWidget(arrow)
+        else:
+            # Comportement disque comme avant
+            drive, rest = os.path.splitdrive(path)
+            if drive:
+                parts.append(drive + os.sep)
+                rest = rest.lstrip(os.sep)
+            if rest:
+                parts += rest.split(os.sep)
+            current = ""
+            for i, part in enumerate(parts):
+                if i == 0:
+                    current = part
+                else:
+                    current = os.path.join(current, part)
+                btn = QPushButton(part)
+                btn.setFlat(True)
+                btn.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+                btn.setStyleSheet("padding: 2px 8px; margin: 0 2px;")
+                btn.clicked.connect(lambda checked, p=current: self.show_folder(p))
+                self.breadcrumb_layout.addWidget(btn)
+                if i < len(parts) - 1:
+                    arrow = QLabel(">")
+                    arrow.setStyleSheet("padding: 0 4px;")
+                    self.breadcrumb_layout.addWidget(arrow)
         # Ajoute le spacer à la fin pour pousser les boutons à gauche
         self.breadcrumb_layout.addItem(self.breadcrumb_spacer)
 
@@ -565,4 +617,20 @@ class MainWindow(QWidget):
             parent = os.path.dirname(self.current_path.rstrip(os.sep))
             if parent and parent in self.scanned_data:
                 self.show_folder(parent)
+
+    def select_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Choisir un dossier à scanner")
+        if folder:
+            self.selected_path = folder
+            self.selected_type = "folder"
+            # Tronque le chemin si trop long
+            display_path = folder
+            max_len = 40
+            if len(folder) > max_len:
+                display_path = "..." + folder[-(max_len-3):]
+            self.scan_status_label.setText(f"Dossier sélectionné : {display_path}")
+            self.disk_buttongroup.setExclusive(False)
+            for radio in self.disk_radiobuttons:
+                radio.setChecked(False)
+            self.disk_buttongroup.setExclusive(True)
 
