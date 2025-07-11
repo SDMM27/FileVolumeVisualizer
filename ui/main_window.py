@@ -1,4 +1,5 @@
 import os
+import sys
 import shutil
 import threading
 from PyQt6.QtWidgets import (
@@ -210,6 +211,12 @@ class MainWindow(QWidget):
                 self.selected_path = None
                 self.selected_type = None
 
+    def resource_path(self, relative_path):
+        """Retourne le chemin absolu vers un fichier de ressource, compatible PyInstaller."""
+        if hasattr(sys, '_MEIPASS'):
+            return os.path.join(sys._MEIPASS, relative_path)
+        return os.path.join(os.path.abspath("."), relative_path)
+
     def start_scan(self):
         if self.scan_running:
             self.scan_status_label.setText("Un scan est déjà en cours.")
@@ -268,7 +275,7 @@ class MainWindow(QWidget):
             node = QTreeWidgetItem([item['name'], format_size(item['size'])])
             node.setData(0, Qt.ItemDataRole.UserRole, item['path'])
 
-            icon = QIcon("resources/folder.png") if os.path.isdir(item['path']) else QIcon("resources/file.png")
+            icon = QIcon(self.resource_path("resources/folder.png")) if os.path.isdir(item['path']) else QIcon(self.resource_path("resources/file.png"))
             node.setIcon(0, icon)
 
             if os.path.isdir(item['path']):
@@ -293,7 +300,7 @@ class MainWindow(QWidget):
             if child['is_dir']:
                 sub_item.setChildIndicatorPolicy(QTreeWidgetItem.ChildIndicatorPolicy.ShowIndicator)
 
-            icon = QIcon("resources/folder.png") if child['is_dir'] else QIcon("resources/file.png")
+            icon = QIcon(self.resource_path("resources/folder.png")) if child['is_dir'] else QIcon(self.resource_path("resources/file.png"))
             sub_item.setIcon(0, icon)
 
             item.addChild(sub_item)
@@ -551,7 +558,7 @@ class MainWindow(QWidget):
             if item['size'] >= min_size_bytes:
                 node = QTreeWidgetItem([item['name'], format_size(item['size'])])
                 node.setData(0, Qt.ItemDataRole.UserRole, item['path'])
-                icon = QIcon("resources/folder.png") if item['is_dir'] else QIcon("resources/file.png")
+                icon = QIcon(self.resource_path("resources/folder.png")) if item['is_dir'] else QIcon(self.resource_path("resources/file.png"))
                 node.setIcon(0, icon)
                 self.file_list.addTopLevelItem(node)
         self.update_stats()
