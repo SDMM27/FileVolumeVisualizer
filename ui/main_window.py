@@ -22,6 +22,8 @@ class MainWindow(QWidget):
     def __init__(self):
 
         super().__init__()
+        self.selected_path = None
+        self.selected_type = None
         self.dark_mode = True  # ⬅️ change ça pour tester
         self.apply_theme()
         self.setWindowTitle("DiskSpace Analyzer")
@@ -223,6 +225,11 @@ class MainWindow(QWidget):
             return
         if not self.selected_path or not self.selected_type:
             self.scan_status_label.setText("Veuillez sélectionner un disque ou un dossier avant de lancer le scan.")
+            self.file_list.clear()
+            self.breadcrumb_widget.setDisabled(True)
+            self.scan_button.setEnabled(True)
+            self.folder_button.setEnabled(True)
+            self.scan_running = False
             return
 
         self.file_list.clear()
