@@ -14,8 +14,8 @@
 
 ### Version exécutable (Windows)
 
-1. Téléchargez le fichier `main.exe` depuis la [release GitHub](https://github.com/SDMM27/FileVolumeVisualizer/releases).
-2. Placez le dossier `resources` (contenant les images) à côté de `main.exe` si besoin.
+1. Téléchargez le fichier `FileVolumeVisualizer.exe` depuis la [release GitHub](https://github.com/SDMM27/FileVolumeVisualizer/releases).
+2. Exécutez le fichier téléchargé.
 
 ### Version Python
 
