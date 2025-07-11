@@ -155,6 +155,8 @@ class MainWindow(QWidget):
         # self.file_list.itemDoubleClicked.connect(self.on_item_double_clicked)
         # self.main_layout.addWidget(self.file_list)
 
+        self.scan_running = False  # ← Ajoute cette ligne
+
 
     def populate_disks(self):
         self.disk_radiobuttons.clear()
@@ -201,12 +203,19 @@ class MainWindow(QWidget):
                 self.selected_type = None
 
     def start_scan(self):
+        if self.scan_running:
+            self.scan_status_label.setText("Un scan est déjà en cours.")
+            return
         if not self.selected_path or not self.selected_type:
             self.scan_status_label.setText("Veuillez sélectionner un disque ou un dossier avant de lancer le scan.")
             return
 
         self.file_list.clear()
+        self.file_list.setDisabled(True)
+        self.breadcrumb_widget.setDisabled(True)  # Désactive le fil d'ariane
         self.scan_button.setEnabled(False)
+        self.folder_button.setEnabled(False)
+        self.scan_running = True
         if self.selected_type == "disk":
             self.scan_status_label.setText(f"Scan du disque {self.selected_path} en cours...")
         else:
@@ -216,10 +225,14 @@ class MainWindow(QWidget):
 
     def on_scan_finished(self, children_dict):
         self.scanned_data = children_dict
-        self.base_disk_path = next(iter(children_dict))  # <-- Ajoute cette ligne
+        self.base_disk_path = next(iter(children_dict))
         self.show_folder(self.base_disk_path)
         self.scan_status_label.setText("Scan terminé")
         self.scan_button.setEnabled(True)
+        self.folder_button.setEnabled(True)
+        self.file_list.setDisabled(False)
+        self.breadcrumb_widget.setDisabled(False)  # Réactive le fil d'ariane
+        self.scan_running = False
 
 
     def scan_thread(self, path):
@@ -335,185 +348,109 @@ class MainWindow(QWidget):
 
 
     def apply_theme(self):
-        if self.dark_mode:
-            self.setStyleSheet("""
-                QWidget {
-                    background-color: #1e1e1e;
-                    color: white;
-                }
+        # Couleurs et styles identiques pour les deux thèmes
+        base_bg = "#1e1e1e" if self.dark_mode else "#ffffff"
+        text_color = "white" if self.dark_mode else "black"
+        group_bg = base_bg
+        border_color = "#888" if self.dark_mode else "#ddd"
+        button_bg = "#2d2d2d" if self.dark_mode else "#f0f0f0"
+        button_hover = "#3c3c3c" if self.dark_mode else "#e2e2e2"
+        button_text = text_color
+        progress_bg = "#2c2c2c" if self.dark_mode else "#eee"
+        progress_chunk = "#a45de4" if self.dark_mode else "#4c7bf4"
+        header_bg = "#2a2a2a" if self.dark_mode else "#f5f5f5"
+        header_text = text_color
+        scrollbar_bg = "#2c2c2c" if self.dark_mode else "#f0f0f0"
+        scrollbar_handle = "#555" if self.dark_mode else "#ccc"
 
-                QGroupBox {
-                    border: 1px solid #888;
-                    border-radius: 6px;
-                    margin-top: 10px;
-                    padding: 10px;
-                    background-color: #1e1e1e;
-                }
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {base_bg};
+                color: {text_color};
+            }}
 
-                QGroupBox::title {
-                    subcontrol-origin: content;
-                    subcontrol-position: top left;
-                    padding: 0px 6px 2px 6px;
-                    color: white;
-                    font-weight: 600;
-                }
+            QGroupBox {{
+                border: 1px solid {border_color};
+                border-radius: 6px;
+                margin-top: 10px;
+                padding: 10px;
+                background-color: {group_bg};
+            }}
 
-                QLabel, QRadioButton {
-                    color: white;
-                }
+            QGroupBox::title {{
+                subcontrol-origin: content;
+                subcontrol-position: top left;
+                padding: 0px 6px 2px 6px;
+                color: {text_color};
+                font-weight: 600;
+            }}
 
-                QRadioButton::indicator {
-                    width: 10px;
-                    height: 10px;
-                    border-radius: 5px;
-                    border: 2px solid #888;
-                    background: #f0f0f0;
-                }
-                QRadioButton::indicator:checked {
-                    background: #4c7bf4;  /* Couleur claire pour la coche */
-                    border: 2px solid #fff;
-                }
-                QRadioButton::indicator:hover {
-                    border: 2px solid #4c7bf4;
-                }
+            QLabel, QRadioButton {{
+                color: {text_color};
+            }}
 
-                QPushButton {
-                    background-color: #2d2d2d;
-                    color: white;
-                    border: 1px solid #555;
-                    border-radius: 4px;
-                    padding: 5px;
-                }
+            QRadioButton::indicator {{
+                width: 10px;
+                height: 10px;
+                border-radius: 5px;
+                border: 2px solid #888;
+                background: #f0f0f0;
+            }}
+            QRadioButton::indicator:checked {{
+                background: #4c7bf4;
+                border: 2px solid #fff;
+            }}
+            QRadioButton::indicator:hover {{
+                border: 2px solid #4c7bf4;
+            }}
 
-                QPushButton:hover {
-                    background-color: #3c3c3c;
-                }
+            QPushButton {{
+                background-color: {button_bg};
+                color: {button_text};
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 5px;
+            }}
 
-                QProgressBar {
-                    border: 1px solid #444;
-                    border-radius: 4px;
-                    background-color: #2c2c2c;
-                }
+            QPushButton:hover {{
+                background-color: {button_hover};
+            }}
 
-                QProgressBar::chunk {
-                    background-color: #a45de4;
-                    border-radius: 4px;
-                }
+            QProgressBar {{
+                border: 1px solid #444;
+                border-radius: 4px;
+                background-color: {progress_bg};
+            }}
 
-                QTreeWidget {
-                    background-color: #1e1e1e;
-                    color: white;
-                    border: none;
-                }
+            QProgressBar::chunk {{
+                background-color: {progress_chunk};
+                border-radius: 4px;
+            }}
 
-                QHeaderView::section {
-                    background-color: #2a2a2a;
-                    color: white;
-                    border: none;
-                    padding: 6px;
-                }
+            QTreeWidget {{
+                background-color: {base_bg};
+                color: {text_color};
+                border: none;
+            }}
 
-                QScrollBar:vertical, QScrollBar:horizontal {
-                    background: #2c2c2c;
-                    width: 10px;
-                    height: 10px;
-                }
+            QHeaderView::section {{
+                background-color: {header_bg};
+                color: {header_text};
+                border: none;
+                padding: 6px;
+            }}
 
-                QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-                    background: #555;
-                    border-radius: 5px;
-                }
-            """)
+            QScrollBar:vertical, QScrollBar:horizontal {{
+                background: {scrollbar_bg};
+                width: 10px;
+                height: 10px;
+            }}
 
-        else:
-            self.setStyleSheet("""
-                QWidget {
-                    background-color: white;
-                    color: black;
-                }
-
-                QGroupBox {
-                    border: 1px solid #ddd;
-                    border-radius: 8px;
-                    margin-top: 10px;
-                    padding: 10px;
-                    background-color: white;
-                }
-
-                QGroupBox::title {
-                    subcontrol-origin: content;
-                    subcontrol-position: top left;
-                    padding: 0px 6px 2px 6px;
-                    color: #222;
-                    font-weight: 600;
-                }
-
-                QLabel, QRadioButton {
-                    color: #222;
-                }
-
-                QRadioButton::indicator {
-                    width: 10px;
-                    height: 10px;
-                    border-radius: 5px;
-                    border: 2px solid #888;
-                    background: #f0f0f0;
-                }
-                QRadioButton::indicator:checked {
-                    background: #4c7bf4;  /* Couleur claire pour la coche */
-                    border: 2px solid #fff;
-                }
-                QRadioButton::indicator:hover {
-                    border: 2px solid #4c7bf4;
-                }
-
-                QPushButton {
-                    background-color: #f0f0f0;
-                    color: black;
-                    border: 1px solid #ccc;
-                    border-radius: 4px;
-                    padding: 5px;
-                }
-
-                QPushButton:hover {
-                    background-color: #e2e2e2;
-                }
-
-                QProgressBar {
-                    border: 1px solid #ccc;
-                    border-radius: 4px;
-                    background-color: #eee;
-                }
-
-                QProgressBar::chunk {
-                    background-color: #4c7bf4;
-                    border-radius: 4px;
-                }
-
-                QTreeWidget {
-                    background-color: white;
-                    color: black;
-                    border: none;
-                }
-
-                QHeaderView::section {
-                    background-color: #f5f5f5;
-                    color: black;
-                    border: none;
-                    padding: 6px;
-                }
-
-                QScrollBar:vertical, QScrollBar:horizontal {
-                    background: #f0f0f0;
-                    width: 10px;
-                    height: 10px;
-                }
-
-                QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-                    background: #ccc;
-                    border-radius: 5px;
-                }
-            """)
+            QScrollBar::handle:vertical, QScrollBar::handle:horizontal {{
+                background: {scrollbar_handle};
+                border-radius: 5px;
+            }}
+        """)
 
     def scan_subfolders(self, folder_path, progress_callback):
         """Scan récursivement tous les sous-dossiers et retourne un dict."""# <-- Ajout du log
